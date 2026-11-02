@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XPT Social - Facebook Clone</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { background-color: #f0f2f5; }
+        .post-card { background: white; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body class="font-sans text-gray-900">
+
+    <!-- NAVBAR -->
+    <nav id="navbar" class="bg-white shadow-sm sticky top-0 z-50 hidden">
+        <div class="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+            <h1 class="text-blue-600 text-2xl font-bold">XPT Social</h1>
+            <div class="flex items-center gap-3">
+                <span id="user-display-name" class="font-semibold text-sm"></span>
+                <button onclick="handleLogout()" class="bg-gray-200 px-3 py-1 rounded-lg text-sm hover:bg-gray-300">Salir</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-2xl mx-auto mt-6 px-4">
+        
+        <!-- SECCIÓN DE AUTH (LOGIN/SIGNUP) -->
+        <div id="auth-section" class="bg-white p-8 rounded-xl shadow-md text-center">
+            <h2 id="auth-title" class="text-2xl font-bold mb-6">Bienvenido</h2>
+            <div class="space-y-4">
+                <input type="email" id="auth-email" placeholder="Email" class="w-full p-3 border border-gray-300 rounded-lg outline-blue-500">
+                <input type="password" id="auth-pass" placeholder="Contraseña" class="w-full p-3 border border-gray-300 rounded-lg outline-blue-500">
+                <div id="auth-error" class="text-red-500 text-sm hidden"></div>
+                <button onclick="handleAuth('login')" class="w-full bg-blue-600 text-white p-3 rounded-lg font-bold hover:bg-blue-700">Entrar</button>
+                <button onclick="handleAuth('signup')" class="w-full border border-blue-600 text-blue-600 p-3 rounded-lg font-bold hover:bg-blue-50">Registrarse</button>
+            </div>
+        </div>
+
+        <!-- COMPOSER SECTION -->
+        <div id="composer-section" class="hidden mb-6">
+            <div class="post-card p-4">
+                <div class="flex gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-full bg-blue-500 flex-shrink-0"></div>
+                    <textarea id="post-text" placeholder="¿Qué estás pensando?" class="w-full text-lg outline-none resize-none overflow-hidden" rows="2"></textarea>
+                </div>
+                <div class="border-t pt-3 flex items-center justify-between">
+                    <div class="flex gap-4">
+                        <label class="cursor-pointer hover:bg-gray-100 p-2 rounded-lg flex items-center gap-2 text-gray-600">
+                            <span>🖼️ Foto/Video</span>
+                            <input type="file" id="post-file" class="hidden" accept="image/*,video/*">
+                        </label>
+                        <span id="file-name" class="text-xs text-blue-500 italic"></span>
+                    </div>
+                    <button onclick="createPost()" class="bg-blue-600 text-white px-6 py-1.5 rounded-lg font-bold hover:bg-blue-700">Publicar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- FEED SECTION -->
+        <div id="feed-section" class="hidden space-y-4">
+            <!-- Los posts se inyectan aquí -->
+        </div>
+
+    </main>
+
+    <script>
+        // CONFIGURACIÓN - REEMPLAZA CON TUS DATOS
+        const SUPABASE_URL = 'https://lxolokrsipasbhnwfhni.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4b2xva3JzaXBhc2JobndmaG5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1NzM4ODksImV4cCI6MjEwOTE0OTg4OX0.vlF7ALzdWynwW-GaiOEpP9kLE9felVGYc_hvA5N_FxQ';
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // VARIABLES DE ESTADO
+        let currentUser = null;
+
+        // DOM ELEMENTS
+        const authSection = document.getElementById('auth-section');
+        const composerSection = document.getElementById('composer-section');
+        const feedSection = document.getElementById('feed-section');
+        const navbar = document.getElementById('navbar');
+        const postFile = document.getElementById('post-file');
+        const fileNameDisplay = document.getElementById('file-name');
+
+        // INICIALIZACIÓN
+        async function init() {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                currentUser = session.user;
+                setupUI(currentUser);
+                fetchPosts();
+            }
+            
+            // Escuchar cambios de auth
+            supabase.auth.onAuthStateChange((event, session) => {
+                if (session) {
+                    currentUser = session.user;
+                    setupUI(currentUser);
+                    fetchPosts();
+                } else {
+                    currentUser = null;
+                    resetUI();
+                }
+            });
+        }
+
+        function setupUI(user) {
+            authSection.classList.add('hidden');
+            composerSection.classList.remove('hidden');
+            feedSection.classList.remove('hidden');
+            navbar.classList.remove('hidden');
+            document.getElementById('user-display-name').innerText = user.email.split('@')[0];
+        }
+
+        function resetUI() {
+            authSection.classList.remove('hidden');
+            composerSection.classList.add('hidden');
+            feedSection.classList.add('hidden');
+            navbar.classList.add('hidden');
+        }
+
+        // --- AUTENTICACIÓN ---
+        async function handleAuth(type) {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-pass').value;
+            const errorDiv = document.getElementById('auth-error');
+
+            const { data, error } = type === 'login' 
+                ? await supabase.auth.signInWithPassword({ email, password })
+                : await supabase.auth.signUp({ email, password });
+
+            if (error) {
+                errorDiv.innerText = error.message;
+                errorDiv.classList.remove('hidden');
+            } else {
+                errorDiv.classList.add('hidden');
+                if(type === 'signup') alert('Registro exitoso. Revisa tu email o inicia sesión.');
+            }
+        }
+
+        async function handleLogout() {
+            await supabase.auth.signOut();
+        }
+
+        // --- GESTIÓN DE POSTS ---
+        postFile.addEventListener('change', (e) => {
+            if(e.target.files[0]) fileNameDisplay.innerText = e.target.files[0].name;
+        });
+
+        async function createPost() {
+            const text = document.getElementById('post-text').value;
+            const file = postFile.files[0];
+            let mediaUrl = null;
+            let mediaType = 'text';
+
+            if (!text && !file) return alert("Escribe algo o selecciona un archivo");
+
+            // 1. Si hay archivo, subir a Supabase Storage
+            if (file) {
+                const fileExt = file.name.split('.').pop();
+                const fileName = `${Math.random()}.${fileExt}`;
+                const filePath = `${currentUser.id}/${fileName}`;
+                
+                const { data: uploadData, error: uploadError } = await supabase.storage
+                    .from('post-media')
+                    .upload(filePath, file);
+
+                if (uploadError) return alert("Error al subir archivo: " + uploadError.message);
+                
+                // Obtener URL pública
+                const { data: urlData } = supabase.storage.from('post-media').getPublicUrl(filePath);
+                mediaUrl = urlData.publicUrl;
+                mediaType = file.type.startsWith('video') ? 'video' : 'image';
+            }
+
+            // 2. Insertar en la tabla de posts
+            const { error } = await supabase.from('posts').insert([{
+                user_id: currentUser.id,
+                content: text,
+                media_url: mediaUrl,
+                media_type: mediaType
+            }]);
+
+            if (error) {
+                alert("Error al crear post: " + error.message);
+            } else {
+                // Reset campos
+                document.getElementById('post-text').value = '';
+                postFile.value = '';
+                fileNameDisplay.innerText = '';
+                fetchPosts(); // Recargar feed
+            }
+        }
+
+        async function fetchPosts() {
+            // Obtenemos posts y unimos con el perfil
+            const { data, error } = await supabase
+                .from('posts')
+                .select(`
+                    *,
+                    profiles (username, avatar_url),
+                    likes (count)
+                `)
+                .order('created_at', { ascending: false});
+                if (error) return console.error(error);
+            renderFeed(posts);
+        }
+
+        function renderFeed(posts) {
+            feedSection.innerHTML = '';
+            posts.forEach(post => {
+                const div = document.createElement('div');
+                div.className = 'post-card p-4';
+                
+                let mediaHTML = '';
+                if (post.media_type === 'image') mediaHTML = `<img src="${post.media_url}" class="w-full max-h-96 object-cover rounded-md mt-3">`;
+                if (post.media_type === 'video') mediaHTML = `<video src="${post.media_url}" controls class="w-full rounded-md mt-3"></video>`;
+
+                div.innerHTML = `
+                    <div class="flex items-center gap-3 mb-3">
+                        <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-600">
+                            ${post.profiles?.username ? post.profiles.username[0].toUpperCase() : '?'}
+                        </div>
+                        <div>
+                            <p class="font-bold text-sm">${post.profiles?.username || 'Usuario'}</p>
+                            <p class="text-xs text-gray-500">${new Date(post.created_at).toLocaleString()}</p>
+                        </div>
+                    </div>
+                    <p class="whitespace-pre-wrap">${post.content || ''}</p>
+                    ${mediaHTML}
+                    <div class="mt-4 pt-3 border-t flex gap-6">
+                        <button onclick="likePost(${post.id})" class="flex items-center gap-2 text-gray-600 hover:text-blue-600 transition">
+                            <span>👍</span> <span class="text-sm font-medium">${post.likes || 0}</span>
+                        </button>
+                        <button class="text-gray-600 hover:text-blue-600 transition text-sm font-medium">💬 Comentar</button>
+                    </div>
+                `;
+                feedSection.appendChild(div);
+            });
+        }
+
+        async function likePost(postId) {
+            if (!currentUser) return alert("Inicia sesión para dar Like");
+            const { error } = await supabase.from('likes').insert([{ user_id: currentUser.id, post_id: postId }]);
+            if (error) {
+                // Si ya existía (error de duplicado), la lógica de "toggle" sería eliminarlo
+                alert("Ya diste Like!");
+            } else {
+                fetchFeed();
+            }
+        }
+
+        // INICIAR APP
+        init();
+        supabase.auth.onAuthStateChange((event, session) => updateUI(session));
+    </script>
+</body>
+</html>
+
+
+
